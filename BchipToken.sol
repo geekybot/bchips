@@ -1,4 +1,3 @@
-
 pragma solidity ^0.5.0;
 
 import "./ERC1155.sol";
@@ -12,6 +11,9 @@ contract BchipToken is ERC1155 {
 
     bytes4 constant private INTERFACE_SIGNATURE_URI = 0x0e89341c;
 
+    //owner of the contract
+    address public owner;
+    
     // id => creators
     mapping (uint256 => address) public creators;
 
@@ -20,15 +22,29 @@ contract BchipToken is ERC1155 {
     
     // token exchange request mapping
     struct exchange {
+        address sender;
+        address reciever;
         uint256 fromTokenId;
         uint256 toTokenid;
         uint256 amount;
         bool approved;
     }
 
+    struct mintRequest {
+        address serviceProvider;
+        uint tokenId; //default 0 for new token creation
+        uint amount;
+        bool created; //true when created
+        bool status;  //false for rejected, true for to be approved or approved
+        string uri;   //default "" to be pased
+    }
+
     event Exchange(address _from, address _to, uint256 _fromid, uint256 _toid, uint256 amount, bool _approved);
     // mapping of exchange request
-    mapping(address => mapping(address => exchange)) public exchangeRequest;
+    
+    mintRequest[] public mintRequests;
+    
+    mapping(address => exchange[]) public exchangeRequests;
     
     mapping(address => mapping(uint256 => uint256)) public lockedTokens;
 
@@ -52,8 +68,54 @@ contract BchipToken is ERC1155 {
         }
     }
 
+    constructor() public {
+        owner = msg.sender;
+    }
+    
+    function submitNewTokenRequest(uint _tokenId, uint _amount, string calldata _uri) external {
+        mintRequest memory mr = mintRequest(msg.sender, _tokenId, _amount, false, true, _uri);
+        mintRequests.push(mr);
+    }
+    
+    function getMintRequest(uint _index) external view returns(address, uint, bool, bool, string memory) {
+        mintRequest memory mr = mintRequests[_index];
+        return(mr.serviceProvider, mr.amount, mr.created, mr.status, mr.uri);
+    }
+    
+    function getLengthMintRequests() external view returns(uint){
+        return mintRequests.length;
+    }
+
+    function approveMintRequest(uint _index) external returns (uint256 _id){
+        require(msg.sender == owner, "Only platform owner can create new tokens");
+        mintRequest memory mr = mintRequests[_index];
+        if(mr.tokenId == 0){
+            _id = ++nonce;
+            creators[_id] = msg.sender;
+            balances[_id][mr.serviceProvider] = mr.amount;    
+            serviceProvider[mr.serviceProvider] = true;
+            if (bytes(mr.uri).length > 0)
+                emit URI(mr.uri, _id);
+        }
+        else{
+            _id = mr.tokenId;
+            balances[_id][mr.serviceProvider] = mr.amount.add(balances[_id][mr.serviceProvider]);
+            serviceProvider[mr.serviceProvider] = true;
+        }
+        mintRequests[_index].created = true;
+        // Transfer event with mint semantic
+        emit TransferSingle(msg.sender, address(0x0), mr.serviceProvider, _id, mr.amount);
+    }
+    function rejectMintRequest(uint _index) external {
+        require(msg.sender == owner, "Only platform owner can create new tokens");
+        mintRequests[_index].created = true;
+        mintRequests[_index].status = false;
+    }
+    
+
     // Creates a new token type and assings _initialSupply to minter
     function create(string calldata _uri) external returns(uint256 _id) {
+        require(msg.sender == owner, "Only platform owner can create new tokens");
         _id = ++nonce;
         creators[_id] = msg.sender;
         balances[_id][msg.sender] = 0;
@@ -101,21 +163,23 @@ contract BchipToken is ERC1155 {
         require(_recipient != address(0x0), "Can't request exchange to a null address");
         require(balances[_fromid][msg.sender] >= _amount && balances[_toid][_recipient] >= _amount, "Insufficient amount to exchange");
         exchange memory ec =  exchange(
+            msg.sender,
+            _recipient,
             _fromid,
             _toid,
             _amount,
             false
         );
-        exchangeRequest[msg.sender][_recipient] = ec;
+        exchangeRequests[_recipient].push(ec);
         //add allowance to _recipient for token exchange
         lockedTokens[msg.sender][_fromid] += _amount;
         balances[_fromid][msg.sender] -= _amount;
         emit Exchange(msg.sender, _recipient, _fromid, _toid, _amount, false);
     }
     
-    function acceptExchange(address _sender) external {
-        exchange storage ec = exchangeRequest[_sender][msg.sender];
-        lockedTokens[_sender][ec.fromTokenId] -= ec.amount;
+    function acceptExchange(uint _index) external {
+        exchange storage ec = exchangeRequests[msg.sender][_index];
+        lockedTokens[ec.sender][ec.fromTokenId] -= ec.amount;
         balances[ec.toTokenid][msg.sender] -= ec.amount;
         balances[ec.fromTokenId][msg.sender] += ec.amount;
         ec.approved = true;
@@ -123,10 +187,18 @@ contract BchipToken is ERC1155 {
         ec.toTokenid = 0;
         ec.amount = 0;
         //set transfer/exchange succcessful
-        exchangeRequest[_sender][msg.sender] = ec;
-        emit Exchange(_sender, msg.sender,  ec.fromTokenId, ec.toTokenid, ec.amount, true);
+        exchangeRequests[msg.sender][_index] = ec;
+        emit Exchange(ec.sender, msg.sender,  ec.fromTokenId, ec.toTokenid, ec.amount, true);
+    }
+    
+    function getExchangeRequests(uint _index) external view returns (address, address, uint, uint, uint, bool){
+        exchange memory er = exchangeRequests[msg.sender][_index];
+        return(er.sender, er.reciever, er.fromTokenId, er.toTokenid, er.amount, er.approved);
     }
         
+    function getLengthofExchangeRequests(address _recipient) external view returns(uint){
+        return exchangeRequests[_recipient].length;
+    }
     //voting campaigns
     struct Proposal {
         bytes32 name;   // short name (up to 32 bytes)
@@ -201,7 +273,7 @@ contract BchipToken is ERC1155 {
         return campaigns.length;
     }
     
-    function gateCampaign(uint256 _campaignId) external view returns(uint256, uint256, uint256, bool, string memory, uint256){
+    function getCampaign(uint256 _campaignId) external view returns(uint256, uint256, uint256, bool, string memory, uint256){
         Campaign memory cmp = campaigns[_campaignId];
         return(cmp.tokenId, cmp.stakeAmount, cmp.expiry, cmp.active, cmp.topic, proposals[_campaignId].length);
     }
