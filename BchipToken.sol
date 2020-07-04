@@ -106,6 +106,7 @@ contract BchipToken is ERC1155 {
         // Transfer event with mint semantic
         emit TransferSingle(msg.sender, address(0x0), mr.serviceProvider, _id, mr.amount);
     }
+    
     function rejectMintRequest(uint _index) external {
         require(msg.sender == owner, "Only platform owner can create new tokens");
         mintRequests[_index].created = true;
@@ -147,6 +148,13 @@ contract BchipToken is ERC1155 {
                 _doSafeTransferAcceptanceCheck(msg.sender, msg.sender, to, _id, quantity, '');
             }
         }
+    }
+    
+    function _merge(address _sender1, uint _tokenId1, address _sender2, uint _tokenId2, uint _amount, uint _mergedTokenId) internal {
+        require(balances[_tokenId1][_sender1] >=_amount && balances[_tokenId2][_sender2] >=_amount, "Insufficient balance");
+        balances[_tokenId1][_sender1] -= _amount;
+        balances[_tokenId2][_sender2] -= _amount;
+        balances[_mergedTokenId][_sender1] += _amount;
     }
     
     function burn(uint256[] calldata _id, uint256[] calldata _amounts) external {
@@ -206,6 +214,7 @@ contract BchipToken is ERC1155 {
     }
     
     struct Campaign{
+        address campaignCreator;
         uint256 tokenId;
         uint256 stakeAmount;
         uint256 expiry;
@@ -213,6 +222,10 @@ contract BchipToken is ERC1155 {
         string topic;
         bytes32 winnerName;
         uint256 voteCount;
+        bool merge;
+        uint256 mergeTokenId;
+        uint256 senderTokenId;
+        uint senderTokenAmount;
     }
     
     uint256 public campaignId = 0;
@@ -221,10 +234,23 @@ contract BchipToken is ERC1155 {
     
     mapping(address => mapping(uint256 => bool)) public votedForCampaign;
     
-    function createCampaign(uint256 _requiredTokenId, uint256 _stakeAmount, uint256 _expiry, string calldata _topic, bytes32[] calldata _proposalList) external {
+    function createCampaign( uint256 _requiredTokenId, uint256 _stakeAmount, uint256 _expiry, string calldata _topic, bytes32[] calldata _proposalList, bool _mergeReq, string calldata _uri, uint _senderTokenId, uint _senderTokenAmount) external {
         require(serviceProvider[msg.sender], "Only service providers can create campaign");
         campaignId = campaignId++;
-        Campaign memory cmp = Campaign(_requiredTokenId, _stakeAmount, _expiry, true, _topic, "", 0);
+        uint256 _id = 0;
+        if(_mergeReq) {
+            _id = ++nonce;
+            creators[_id] = owner;
+            balances[_id][owner] = 0;
+            
+            // Transfer event with mint semantic
+            emit TransferSingle(msg.sender, address(0x0), msg.sender, _id, 0);
+    
+            if (bytes(_uri).length > 0)
+                emit URI(_uri, _id);
+        }
+        balances[_senderTokenId][msg.sender] -= _senderTokenAmount;        
+        Campaign memory cmp = Campaign(msg.sender, _requiredTokenId, _stakeAmount, _expiry, true, _topic, "", 0, _mergeReq, _id, _senderTokenId, _senderTokenAmount);
         campaigns.push(cmp);
         for (uint i = 0; i < _proposalList.length; i++) {
             proposals[campaignId].push(Proposal({
@@ -242,6 +268,7 @@ contract BchipToken is ERC1155 {
         balances[cmp.tokenId][msg.sender] -= cmp.stakeAmount;
         votedForCampaign[msg.sender][_campaignId] = true;
         proposals[_campaignId][_proposalId].voteCount += 1;
+        _merge(cmp.campaignCreator, cmp.senderTokenId, msg.sender, cmp.tokenId, cmp.stakeAmount, cmp.mergeTokenId);
     }
     
     function winningProposal(uint256 _campaignId) external returns (bytes32) {
@@ -273,9 +300,14 @@ contract BchipToken is ERC1155 {
         return campaigns.length;
     }
     
-    function getCampaign(uint256 _campaignId) external view returns(uint256, uint256, uint256, bool, string memory, uint256){
+    function getCampaign1(uint256 _campaignId) external view returns(uint, uint256, uint256, bool, string memory, uint256){
         Campaign memory cmp = campaigns[_campaignId];
         return(cmp.tokenId, cmp.stakeAmount, cmp.expiry, cmp.active, cmp.topic, proposals[_campaignId].length);
+    }
+    
+    function getCampaign2(uint256 _campaignId) external view returns(address, bool, uint, uint, uint){
+        Campaign memory cmp = campaigns[_campaignId];
+        return(cmp.campaignCreator, cmp.merge, cmp.mergeTokenId, cmp.senderTokenId, cmp.senderTokenAmount);
     }
     
     function getProposal(uint256 _campaignId, uint256 _index) public view returns(string memory){
