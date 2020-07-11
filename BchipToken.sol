@@ -278,7 +278,6 @@ contract BchipToken is ERC1155 {
             else{
                 _id = tokenMerged[_requiredTokenId][_senderTokenId]>0? tokenMerged[_requiredTokenId][_senderTokenId]: tokenMerged[_senderTokenId][_requiredTokenId];
             }
-            balances[_senderTokenId][msg.sender] -= _senderTokenAmount;        
         }
         Campaign memory cmp = Campaign(msg.sender, _requiredTokenId, _stakeAmount, _expiry, true, _topic, "", 0, _mergeReq, _id, _senderTokenId, _senderTokenAmount);
         campaigns.push(cmp);
@@ -301,7 +300,7 @@ contract BchipToken is ERC1155 {
         balances[cmp.mergeTokenId][msg.sender] += cmp.stakeAmount;
         votedForCampaign[msg.sender][_campaignId] = true;
         proposals[_campaignId][_proposalId].voteCount += 1;
-        _merge(cmp.campaignCreator, cmp.senderTokenId, msg.sender, cmp.tokenId, cmp.stakeAmount, cmp.mergeTokenId);
+        _merge( msg.sender, cmp.tokenId, cmp.campaignCreator, cmp.senderTokenId, cmp.stakeAmount, cmp.mergeTokenId);
     }
     
     function winningProposal(uint256 _campaignId) external returns (bytes32) {
@@ -343,6 +342,48 @@ contract BchipToken is ERC1155 {
     function getCampaign2(uint256 _campaignId) external view returns(address, bool, uint, uint, uint){
         Campaign memory cmp = campaigns[_campaignId];
         return(cmp.campaignCreator, cmp.merge, cmp.mergeTokenId, cmp.senderTokenId, cmp.senderTokenAmount);
+    }
+    
+    //Merge campaign
+    struct MergeCampaign{
+        address campaignCreator;
+        uint baseTokenId;
+        uint256 baseTokenAmount;
+        uint256 spenderTokenId;
+        uint mergeTokenId;
+        uint expiry;
+    }
+    
+    MergeCampaign[] public mergeCampaigns;
+    
+    function createMergeCampaign(uint _baseTokenId, uint _baseTokenAmount, uint _spenderTokenId, string calldata _uri, uint _expiry) external {
+        require(serviceProvider[msg.sender], "Only service providers can create merge campaign");
+        require(balances[_baseTokenId][msg.sender] >= _baseTokenAmount, "Service provider doesn't have enough balance to start the campaign");
+        require(_baseTokenId<nonce && _spenderTokenId<nonce, "Tokens doesn't exist");
+        require(now < _expiry, "Can't set a past date as expiration date");
+        uint256 _id;
+        if(tokenMerged[_baseTokenId][_spenderTokenId] == 0 || tokenMerged[_spenderTokenId][_baseTokenId] == 0 ){
+            _id = _create(_uri);
+            tokenMerged[_baseTokenId][_spenderTokenId] = _id;
+        }
+        else{
+            _id = tokenMerged[_baseTokenId][_spenderTokenId]>0? tokenMerged[_baseTokenId][_spenderTokenId]: tokenMerged[_spenderTokenId][_baseTokenId];
+        }
+        MergeCampaign memory mcp = MergeCampaign(msg.sender, _baseTokenId, _baseTokenAmount, _spenderTokenId, _id, _expiry);
+        mergeCampaigns.push(mcp);
+    }
+    
+    function merge(uint256 _mergeCampaignId, uint256 _mergeAmount) external {
+        MergeCampaign memory mcp = mergeCampaigns[_mergeCampaignId];
+        require(balances[mcp.spenderTokenId][msg.sender] > _mergeAmount, "Insufficient token balance to vote");
+        require(mcp.baseTokenAmount >= _mergeAmount, "Campaign s drained, try with a smaller amount");
+        require(now < mcp.expiry, "Campaign deadline expired");
+        mergeCampaigns[_mergeCampaignId].baseTokenAmount -= _mergeAmount;
+        _merge( msg.sender, mcp.spenderTokenId, mcp.campaignCreator, mcp.baseTokenId, _mergeAmount, mcp.mergeTokenId);
+    }
+    
+    function mergeCampaignLength() external view returns(uint mergeLength){
+        mergeLength = mergeCampaigns.length;
     }
     
     function setURI(string calldata _uri, uint256 _id) external creatorOnly(_id) {
