@@ -296,11 +296,11 @@ contract BchipToken is ERC1155 {
         require(now < cmp.expiry, "Campaign deadline expired");
         require(cmp.active, "Campaign closed");
         require(!votedForCampaign[msg.sender][_campaignId], "User already voted for this");
-        balances[cmp.tokenId][msg.sender] -= cmp.stakeAmount;
-        balances[cmp.mergeTokenId][msg.sender] += cmp.stakeAmount;
         votedForCampaign[msg.sender][_campaignId] = true;
         proposals[_campaignId][_proposalId].voteCount += 1;
-        _merge( msg.sender, cmp.tokenId, cmp.campaignCreator, cmp.senderTokenId, cmp.stakeAmount, cmp.mergeTokenId);
+        if(cmp.merge){
+            _merge( msg.sender, cmp.tokenId, cmp.campaignCreator, cmp.senderTokenId, cmp.stakeAmount, cmp.mergeTokenId);
+        }
     }
     
     function winningProposal(uint256 _campaignId) external returns (bytes32) {
