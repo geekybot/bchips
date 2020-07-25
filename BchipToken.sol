@@ -96,6 +96,8 @@ contract BchipToken is ERC1155 {
         return mintRequests.length;
     }
 
+
+
     function approveMintRequest(uint _index) external returns (uint256 _id){
         require(msg.sender == owner, "Only platform owner can create new tokens");
         mintRequest memory mr = mintRequests[_index];
@@ -121,6 +123,10 @@ contract BchipToken is ERC1155 {
         mintRequests[_index].status = false;
     }
     
+    
+    function tokenMergedId(uint token1, uint token2) public view returns (uint _mergedTokenId) {
+        _mergedTokenId = tokenMerged[token1][token2]>0? tokenMerged[token1][token2]: tokenMerged[token2][token1];
+    }
 
     // Creates a new token type and assings _initialSupply to minter
     function create(bytes32 _tokenName, bytes32 _tokenSymbol) external returns(uint256 _id) {
@@ -378,10 +384,13 @@ contract BchipToken is ERC1155 {
         mergeCampaigns.push(mcp);
     }
     
-    function merge( uint _tokenId1, address _sender2, uint _tokenId2, uint _amount) external {
+    function merge( uint _tokenId1, address _sender2, uint _tokenId2, uint _amount, bytes32 tokenName, bytes32 tokenSymbol) external {
         require(balances[_tokenId1][msg.sender] > _amount, "Insufficient token balance to merge");
         require(balances[_tokenId2][_sender2] > _amount, "Insufficient token balance to merge");
         uint256 _mergedTokenId = tokenMerged[_tokenId1][_tokenId2]>0? tokenMerged[_tokenId1][_tokenId2]: tokenMerged[_tokenId2][_tokenId1];
+        if (_mergedTokenId == 0){
+           _mergedTokenId =  _create(tokenName, tokenSymbol);
+        }
         _merge(msg.sender, _tokenId1, _sender2, _tokenId2, _amount, _mergedTokenId);
     }
     
