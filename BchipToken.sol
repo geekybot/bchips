@@ -14,6 +14,14 @@ contract BchipToken is ERC1155 {
     //owner of the contract
     address public owner;
     
+    struct tokenInfo {
+        bytes32 tokenName;
+        bytes32 symbol;
+    }
+    //token details mapping
+    
+    mapping (uint256 => tokenInfo) public tokens;
+    
     // id => creators
     mapping (uint256 => address) public creators;
 
@@ -37,7 +45,8 @@ contract BchipToken is ERC1155 {
         uint amount;
         bool created; //true when created
         bool status;  //false for rejected, true for to be approved or approved
-        string uri;   //default "" to be pased
+        bytes32 tokenName;   //default "" to be pased
+        bytes32 tokenSymbol;
     }
 
     event Exchange(address _from, address _to, uint256 _fromid, uint256 _toid, uint256 amount, bool _approved);
@@ -73,14 +82,14 @@ contract BchipToken is ERC1155 {
         owner = msg.sender;
     }
     
-    function submitNewTokenRequest(uint _tokenId, uint _amount, string calldata _uri) external {
-        mintRequest memory mr = mintRequest(msg.sender, _tokenId, _amount, false, true, _uri);
+    function submitNewTokenRequest(uint _tokenId, uint _amount, bytes32 _tokenName, bytes32 _tokenSymbol) external {
+        mintRequest memory mr = mintRequest(msg.sender, _tokenId, _amount, false, true, _tokenName, _tokenSymbol);
         mintRequests.push(mr);
     }
     
-    function getMintRequest(uint _index) external view returns(address, uint, bool, bool, string memory, uint) {
+    function getMintRequest(uint _index) external view returns(address, uint, bool, bool, bytes32, bytes32, uint) {
         mintRequest memory mr = mintRequests[_index];
-        return(mr.serviceProvider, mr.amount, mr.created, mr.status, mr.uri, mr.tokenId);
+        return(mr.serviceProvider, mr.amount, mr.created, mr.status, mr.tokenName, mr.tokenSymbol, mr.tokenId);
     }
     
     function getLengthMintRequests() external view returns(uint){
@@ -91,14 +100,10 @@ contract BchipToken is ERC1155 {
         require(msg.sender == owner, "Only platform owner can create new tokens");
         mintRequest memory mr = mintRequests[_index];
         if(mr.tokenId == 0){
-            _id = ++nonce;
-            creators[_id] = msg.sender;
+            _create(mr.tokenName, mr.tokenSymbol);
             balances[_id][mr.serviceProvider] = mr.amount;    
             serviceProvider[mr.serviceProvider] = true;
             mintRequests[_index].tokenId = _id;
-            if (bytes(mr.uri).length > 0)
-                emit URI(mr.uri, _id);
-            
         }
         else{
             _id = mr.tokenId;
@@ -118,21 +123,20 @@ contract BchipToken is ERC1155 {
     
 
     // Creates a new token type and assings _initialSupply to minter
-    function create(string calldata _uri) external returns(uint256 _id) {
+    function create(bytes32 _tokenName, bytes32 _tokenSymbol) external returns(uint256 _id) {
         require(msg.sender == owner, "Only platform owner can create new tokens");
-        _id = _create(_uri);
+        _id = _create(_tokenName, _tokenSymbol);
     }
     
-    function _create(string memory _uri) internal returns(uint256 _id) {
+    function _create(bytes32 _tokenName, bytes32 _tokenSymbol) internal returns(uint256 _id) {
         _id = ++nonce;
         creators[_id] = msg.sender;
         balances[_id][msg.sender] = 0;
-        
+        tokenInfo memory ti = tokenInfo(_tokenName, _tokenSymbol);
+        tokens[_id] = ti;
         // Transfer event with mint semantic
         emit TransferSingle(msg.sender, address(0x0), msg.sender, _id, 0);
 
-        if (bytes(_uri).length > 0)
-            emit URI(_uri, _id);
     }
     
 
@@ -177,6 +181,7 @@ contract BchipToken is ERC1155 {
     }
     
     function _merge(address _sender1, uint _tokenId1, address _sender2, uint _tokenId2, uint _amount, uint _mergedTokenId) internal {
+        require( serviceProvider[_sender1], "Only service provider can merge tokens");
         require(balances[_tokenId1][_sender1] >=_amount && balances[_tokenId2][_sender2] >=_amount, "Insufficient balance");
         balances[_tokenId1][_sender1] -= _amount;
         balances[_tokenId2][_sender2] -= _amount;
@@ -267,12 +272,12 @@ contract BchipToken is ERC1155 {
     
     mapping(address => mapping(uint256 => bool)) public votedForCampaign;
     
-    function createCampaign( uint256 _requiredTokenId, uint256 _stakeAmount, uint256 _expiry, string calldata _topic, bytes32[] calldata _proposalList, bool _mergeReq, string calldata _uri, uint _senderTokenId, uint _senderTokenAmount) external {
+    function createCampaign( uint8 _requiredTokenId, uint256 _stakeAmount, uint256 _expiry, string calldata _topic, bytes32[] calldata _proposalList, bool _mergeReq, bytes32[] calldata _tokenDetails,  uint8 _senderTokenId, uint _senderTokenAmount) external {
         require(serviceProvider[msg.sender], "Only service providers can create campaign");
         uint256 _id;
         if(_mergeReq){
             if(tokenMerged[_requiredTokenId][_senderTokenId] == 0 || tokenMerged[_senderTokenId][_requiredTokenId] == 0 ){
-                _id = _create(_uri);
+                _id = _create(_tokenDetails[0], _tokenDetails[1]);
                 tokenMerged[_requiredTokenId][_senderTokenId] = _id;
             }
             else{
@@ -356,14 +361,14 @@ contract BchipToken is ERC1155 {
     
     MergeCampaign[] public mergeCampaigns;
     
-    function createMergeCampaign(uint _baseTokenId, uint _baseTokenAmount, uint _spenderTokenId, string calldata _uri, uint _expiry) external {
+    function createMergeCampaign(uint _baseTokenId, uint _baseTokenAmount, uint _spenderTokenId, bytes32[] calldata _tokenDetails, uint _expiry) external {
         require(serviceProvider[msg.sender], "Only service providers can create merge campaign");
         require(balances[_baseTokenId][msg.sender] >= _baseTokenAmount, "Service provider doesn't have enough balance to start the campaign");
         require(_baseTokenId<nonce && _spenderTokenId<nonce, "Tokens doesn't exist");
         require(now < _expiry, "Can't set a past date as expiration date");
         uint256 _id;
         if(tokenMerged[_baseTokenId][_spenderTokenId] == 0 || tokenMerged[_spenderTokenId][_baseTokenId] == 0 ){
-            _id = _create(_uri);
+            _id = _create(_tokenDetails[0], _tokenDetails[1]);
             tokenMerged[_baseTokenId][_spenderTokenId] = _id;
         }
         else{
@@ -373,13 +378,11 @@ contract BchipToken is ERC1155 {
         mergeCampaigns.push(mcp);
     }
     
-    function merge(uint256 _mergeCampaignId, uint256 _mergeAmount) external {
-        MergeCampaign memory mcp = mergeCampaigns[_mergeCampaignId];
-        require(balances[mcp.spenderTokenId][msg.sender] > _mergeAmount, "Insufficient token balance to vote");
-        require(mcp.baseTokenAmount >= _mergeAmount, "Campaign s drained, try with a smaller amount");
-        require(now < mcp.expiry, "Campaign deadline expired");
-        mergeCampaigns[_mergeCampaignId].baseTokenAmount -= _mergeAmount;
-        _merge( msg.sender, mcp.spenderTokenId, mcp.campaignCreator, mcp.baseTokenId, _mergeAmount, mcp.mergeTokenId);
+    function merge( uint _tokenId1, address _sender2, uint _tokenId2, uint _amount) external {
+        require(balances[_tokenId1][msg.sender] > _amount, "Insufficient token balance to merge");
+        require(balances[_tokenId2][_sender2] > _amount, "Insufficient token balance to merge");
+        uint256 _mergedTokenId = tokenMerged[_tokenId1][_tokenId2]>0? tokenMerged[_tokenId1][_tokenId2]: tokenMerged[_tokenId2][_tokenId1];
+        _merge(msg.sender, _tokenId1, _sender2, _tokenId2, _amount, _mergedTokenId);
     }
     
     function mergeCampaignLength() external view returns(uint mergeLength){
