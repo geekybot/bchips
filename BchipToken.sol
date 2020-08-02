@@ -102,7 +102,7 @@ contract BchipToken is ERC1155 {
         require(msg.sender == owner, "Only platform owner can create new tokens");
         mintRequest memory mr = mintRequests[_index];
         if(mr.tokenId == 0){
-            _create(mr.tokenName, mr.tokenSymbol);
+            _id = _create(mr.tokenName, mr.tokenSymbol);
             balances[_id][mr.serviceProvider] = mr.amount;    
             serviceProvider[mr.serviceProvider] = true;
             mintRequests[_index].tokenId = _id;
@@ -191,7 +191,7 @@ contract BchipToken is ERC1155 {
         require(balances[_tokenId1][_sender1] >=_amount && balances[_tokenId2][_sender2] >=_amount, "Insufficient balance");
         balances[_tokenId1][_sender1] -= _amount;
         balances[_tokenId2][_sender2] -= _amount;
-        balances[_mergedTokenId][_sender1] += _amount;
+        balances[_mergedTokenId][_sender2] += _amount;
     }
     
     // function createMergeCampaign(){
