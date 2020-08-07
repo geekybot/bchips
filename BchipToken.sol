@@ -194,6 +194,43 @@ contract BchipToken is ERC1155 {
         balances[_mergedTokenId][_sender2] += _amount;
     }
     
+    
+    // internal function to mint token/ award token to user on voting campaign
+    function _awardToken(address _minter, address _recipient, uint _tokenId, uint _amount) internal {
+        require(serviceProvider[_minter], "Minter is not a service provider");
+         balances[_tokenId][_recipient] = _amount.add(balances[_tokenId][_recipient]);
+        // Emit the Transfer/Mint event.
+        // the 0x0 source address implies a mint
+        // It will also provide the circulating supply info.
+        emit TransferSingle(_minter, address(0x0), _recipient, _tokenId, _amount);
+
+        if (_recipient.isContract()) {
+            _doSafeTransferAcceptanceCheck(msg.sender, msg.sender, _recipient, _tokenId, _amount, '');
+        }
+    }
+    
+    // internal function to exchange token between serviceProvider and user on voting on a campiagn
+    function _exchangeToken(address _provider, uint _providerTokenId, address _recipient, uint _tokenId, uint _amount) internal {
+        require(serviceProvider[_provider], "Minter is not a service provider");
+        require(balances[_tokenId][_recipient] >= _amount, "Receipient doesn't have enought balance to exchange");
+        require(balances[_providerTokenId][_provider] >= _amount, "Service Provider doesn't have enought balance to exchange");
+        // update Receipient balance accordingly
+        balances[_tokenId][_recipient] = _amount.sub(balances[_tokenId][_recipient]);
+        balances[_providerTokenId][_recipient] = _amount.add(balances[_providerTokenId][_recipient]);
+        // update service provider balance accordingly
+        balances[_providerTokenId][_provider] = _amount.add(balances[_providerTokenId][_provider]);
+        balances[_tokenId][_provider] = _amount.sub(balances[_tokenId][_provider]);
+        
+        // It will also provide the circulating supply info.
+        emit TransferSingle(_provider, address(0x0), _recipient, _tokenId, _amount);
+
+        if (_recipient.isContract()) {
+            _doSafeTransferAcceptanceCheck(msg.sender, msg.sender, _recipient, _tokenId, _amount, '');
+        }
+    }
+    
+    
+    
     // function createMergeCampaign(){
         
     // }
@@ -267,7 +304,8 @@ contract BchipToken is ERC1155 {
         string topic;
         bytes32 winnerName;
         uint256 voteCount;
-        bool merge;
+        // 1 = merge, 2= award, 3 = exchange
+        uint256 campaignType;
         uint256 mergeTokenId;
         uint256 senderTokenId;
         uint senderTokenAmount;
@@ -278,10 +316,10 @@ contract BchipToken is ERC1155 {
     
     mapping(address => mapping(uint256 => bool)) public votedForCampaign;
     
-    function createCampaign( uint8 _requiredTokenId, uint256 _stakeAmount, uint256 _expiry, string calldata _topic, bytes32[] calldata _proposalList, bool _mergeReq, bytes32[] calldata _tokenDetails,  uint8 _senderTokenId, uint _senderTokenAmount) external {
+    function createCampaign( uint8 _requiredTokenId, uint256 _stakeAmount, uint256 _expiry, string calldata _topic, bytes32[] calldata _proposalList, uint _campaignType, bytes32[] calldata _tokenDetails,  uint8 _senderTokenId, uint _senderTokenAmount) external {
         require(serviceProvider[msg.sender], "Only service providers can create campaign");
         uint256 _id;
-        if(_mergeReq){
+        if(_campaignType == 1){
             if(tokenMerged[_requiredTokenId][_senderTokenId] == 0 || tokenMerged[_senderTokenId][_requiredTokenId] == 0 ){
                 _id = _create(_tokenDetails[0], _tokenDetails[1]);
                 tokenMerged[_requiredTokenId][_senderTokenId] = _id;
@@ -290,7 +328,7 @@ contract BchipToken is ERC1155 {
                 _id = tokenMerged[_requiredTokenId][_senderTokenId]>0? tokenMerged[_requiredTokenId][_senderTokenId]: tokenMerged[_senderTokenId][_requiredTokenId];
             }
         }
-        Campaign memory cmp = Campaign(msg.sender, _requiredTokenId, _stakeAmount, _expiry, true, _topic, "", 0, _mergeReq, _id, _senderTokenId, _senderTokenAmount);
+        Campaign memory cmp = Campaign(msg.sender, _requiredTokenId, _stakeAmount, _expiry, true, _topic, "", 0, _campaignType, _id, _senderTokenId, _senderTokenAmount);
         campaigns.push(cmp);
         uint cmpId = campaigns.length-1;
         for (uint i = 0; i < _proposalList.length; i++) {
@@ -309,8 +347,14 @@ contract BchipToken is ERC1155 {
         require(!votedForCampaign[msg.sender][_campaignId], "User already voted for this");
         votedForCampaign[msg.sender][_campaignId] = true;
         proposals[_campaignId][_proposalId].voteCount += 1;
-        if(cmp.merge){
+        if(cmp.campaignType == 1){
             _merge( msg.sender, cmp.tokenId, cmp.campaignCreator, cmp.senderTokenId, cmp.stakeAmount, cmp.mergeTokenId);
+        }
+        else if(cmp.campaignType == 2){
+            _awardToken(cmp.campaignCreator, msg.sender, cmp.senderTokenId, cmp.senderTokenAmount);
+        }
+        else if(cmp.campaignType == 3){
+            _exchangeToken(cmp.campaignCreator, cmp.tokenId, msg.sender, cmp.senderTokenId, cmp.senderTokenAmount);
         }
     }
     
@@ -350,9 +394,9 @@ contract BchipToken is ERC1155 {
         return(cmp.tokenId, cmp.stakeAmount, cmp.expiry, cmp.active, cmp.topic, proposals[_campaignId].length);
     }
     
-    function getCampaign2(uint256 _campaignId) external view returns(address, bool, uint, uint, uint){
+    function getCampaign2(uint256 _campaignId) external view returns(address, uint, uint, uint, uint){
         Campaign memory cmp = campaigns[_campaignId];
-        return(cmp.campaignCreator, cmp.merge, cmp.mergeTokenId, cmp.senderTokenId, cmp.senderTokenAmount);
+        return(cmp.campaignCreator, cmp.campaignType, cmp.mergeTokenId, cmp.senderTokenId, cmp.senderTokenAmount);
     }
     
     //Merge campaign
