@@ -49,6 +49,16 @@ contract BchipToken is ERC1155 {
         bytes32 tokenSymbol;
     }
 
+    struct Product {
+        uint productId;
+        uint acceptedTokenId;
+        uint acceptedTokenAmount;
+        uint priceUSD;
+    }
+
+    uint public productId;
+    mapping( uint => Product) public products;
+    
     event Exchange(address _from, address _to, uint256 _fromid, uint256 _toid, uint256 amount, bool _approved);
     // mapping of exchange request
     
@@ -80,6 +90,19 @@ contract BchipToken is ERC1155 {
 
     constructor() public {
         owner = msg.sender;
+    }
+    
+    
+    function addNewProduct(uint _accptedTokenId, uint _accptedTokenAmount, uint _priceUSD) external {
+        productId = productId+1;
+        Product memory pr = Product(productId, _accptedTokenId, _accptedTokenAmount, _priceUSD);
+        products[productId] = pr;
+    }
+    
+    function purchaseProduct(uint _productId) external {
+        Product memory pr = products[_productId];
+        require(balances[pr.acceptedTokenId][msg.sender] > pr.acceptedTokenAmount, "You don't have sufficient balance to make this discounted purchase");
+        balances[pr.acceptedTokenId][msg.sender] -= pr.acceptedTokenAmount;
     }
     
     function submitNewTokenRequest(uint _tokenId, uint _amount, bytes32 _tokenName, bytes32 _tokenSymbol) external {
