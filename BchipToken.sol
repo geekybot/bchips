@@ -51,7 +51,7 @@ contract BchipToken is ERC1155 {
 
     struct Product {
         uint productId;
-        uint acceptedTokenId;
+        uint[] acceptedTokenIds;
         uint acceptedTokenAmount;
         uint priceUSD;
     }
@@ -93,16 +93,43 @@ contract BchipToken is ERC1155 {
     }
     
     
-    function addNewProduct(uint _accptedTokenId, uint _accptedTokenAmount, uint _priceUSD) external {
+    function addNewProduct(uint[] calldata _accptedTokenIds, uint _accptedTokenAmount, uint _priceUSD) external {
         productId = productId+1;
-        Product memory pr = Product(productId, _accptedTokenId, _accptedTokenAmount, _priceUSD);
+        Product memory pr = Product(productId, _accptedTokenIds, _accptedTokenAmount, _priceUSD);
         products[productId] = pr;
     }
     
-    function purchaseProduct(uint _productId) external {
+    function purchaseProduct(uint _productId, uint[] calldata _tokenIds, uint[] calldata _amounts) external {
         Product memory pr = products[_productId];
-        require(balances[pr.acceptedTokenId][msg.sender] > pr.acceptedTokenAmount, "You don't have sufficient balance to make this discounted purchase");
-        balances[pr.acceptedTokenId][msg.sender] -= pr.acceptedTokenAmount;
+        require(checkValidTokensAccpeted(_tokenIds, pr.acceptedTokenIds), "One or more tokens are not accepted for this purchase");
+        uint totalAmount = 0;
+        for(uint i=0;i<_tokenIds.length; i++){
+            require(balances[_tokenIds[i]][msg.sender] >= _amounts[i], "You don't have sufficient balance to make this discounted purchase");    
+            totalAmount += _amounts[i];
+            balances[_tokenIds[i]][msg.sender] -= _amounts[i];
+        }
+        require(totalAmount <= pr.acceptedTokenAmount, "You can't redeem more than the accepted amount");
+    }
+    
+    function acceptedTokenIdLength(uint _productId) public view returns (uint ){
+        return products[_productId].acceptedTokenIds.length;
+    }
+    
+    function getAcceptedTokenIds(uint _productId, uint _index) public view returns (uint){
+        return products[_productId].acceptedTokenIds[_index];    
+    }
+    
+    function checkValidTokensAccpeted(uint[] memory inputTokens, uint[] memory accepted) internal pure returns(bool){
+        bool dontExist = true;
+        for(uint i=0;i<inputTokens.length; i++){
+            for(uint j=0;j<accepted.length; j++){
+                if (accepted[j] == inputTokens[i]){
+                    dontExist = false;
+                    break;
+                }
+            }  
+        }
+        return !dontExist;
     }
     
     function submitNewTokenRequest(uint _tokenId, uint _amount, bytes32 _tokenName, bytes32 _tokenSymbol) external {
@@ -210,7 +237,6 @@ contract BchipToken is ERC1155 {
     }
     
     function _merge(address _sender1, uint _tokenId1, address _sender2, uint _tokenId2, uint _amount, uint _mergedTokenId) internal {
-        require( serviceProvider[_sender1], "Only service provider can merge tokens");
         require(balances[_tokenId1][_sender1] >=_amount && balances[_tokenId2][_sender2] >=_amount, "Insufficient balance");
         balances[_tokenId1][_sender1] -= _amount;
         balances[_tokenId2][_sender2] -= _amount;
@@ -238,11 +264,11 @@ contract BchipToken is ERC1155 {
         require(balances[_tokenId][_recipient] >= _amount, "Receipient doesn't have enought balance to exchange");
         require(balances[_providerTokenId][_provider] >= _amount, "Service Provider doesn't have enought balance to exchange");
         // update Receipient balance accordingly
-        balances[_tokenId][_recipient] = _amount.sub(balances[_tokenId][_recipient]);
+        balances[_tokenId][_recipient] = (balances[_tokenId][_recipient]).sub(_amount);
         balances[_providerTokenId][_recipient] = _amount.add(balances[_providerTokenId][_recipient]);
         // update service provider balance accordingly
         balances[_providerTokenId][_provider] = _amount.add(balances[_providerTokenId][_provider]);
-        balances[_tokenId][_provider] = _amount.sub(balances[_tokenId][_provider]);
+        balances[_tokenId][_provider] = (balances[_tokenId][_provider]).sub(_amount);
         
         // It will also provide the circulating supply info.
         emit TransferSingle(_provider, address(0x0), _recipient, _tokenId, _amount);
@@ -377,7 +403,7 @@ contract BchipToken is ERC1155 {
             _awardToken(cmp.campaignCreator, msg.sender, cmp.senderTokenId, cmp.senderTokenAmount);
         }
         else if(cmp.campaignType == 3){
-            _exchangeToken(cmp.campaignCreator, cmp.tokenId, msg.sender, cmp.senderTokenId, cmp.senderTokenAmount);
+            _exchangeToken(cmp.campaignCreator, cmp.senderTokenId, msg.sender, cmp.tokenId, cmp.senderTokenAmount);
         }
     }
     
@@ -452,6 +478,7 @@ contract BchipToken is ERC1155 {
     }
     
     function merge( uint _tokenId1, address _sender2, uint _tokenId2, uint _amount, bytes32 tokenName, bytes32 tokenSymbol) external {
+        require(serviceProvider[msg.sender], "only service provider can merge tokens");
         require(balances[_tokenId1][msg.sender] > _amount, "Insufficient token balance to merge");
         require(balances[_tokenId2][_sender2] > _amount, "Insufficient token balance to merge");
         uint256 _mergedTokenId = tokenMerged[_tokenId1][_tokenId2]>0? tokenMerged[_tokenId1][_tokenId2]: tokenMerged[_tokenId2][_tokenId1];
