@@ -62,6 +62,13 @@ contract BchipToken is ERC1155 {
     mapping( uint => Product) public products;
     
     event Exchange(address _from, address _to, uint256 _fromid, uint256 _toid, uint256 amount, bool _approved);
+    
+    // Events to capture on every tx to make dashboard of data showcase
+    event Purchased(address user, uint productId, uint tokenUsed);
+    event TokenIssuance(address publisher, bool newToken, uint tokenId, bytes32 tokenName, uint tokenAmount);
+    event TokenAward(address user, uint tokenId, bytes32 tokenName, uint tokenAmount);
+    event TokenTransfers(uint tokenId, bytes32 tokenName, uint tokenAmount);
+    
     // mapping of exchange request
     
     mintRequest[] public mintRequests;
@@ -111,6 +118,7 @@ contract BchipToken is ERC1155 {
             balances[_tokenIds[i]][msg.sender] -= _amounts[i];
         }
         require(totalAmount <= pr.acceptedTokenAmount, "You can't redeem more than the accepted amount");
+        emit Purchased(msg.sender, pr.productId, totalAmount);
     }
     
     function acceptedTokenIdLength(uint _productId) public view returns (uint ){
@@ -137,6 +145,7 @@ contract BchipToken is ERC1155 {
     function submitNewTokenRequest(uint _tokenId, uint _amount, bytes32 _tokenName, bytes32 _tokenSymbol, bytes32 _icon) external {
         mintRequest memory mr = mintRequest(msg.sender, _tokenId, _amount, false, true, _tokenName, _tokenSymbol, _icon);
         mintRequests.push(mr);
+        
     }
     
     function getMintRequest(uint _index) external view returns(address, uint, bool, bool, bytes32, bytes32, uint, bytes32) {
@@ -158,11 +167,13 @@ contract BchipToken is ERC1155 {
             balances[_id][mr.serviceProvider] = mr.amount;    
             serviceProvider[mr.serviceProvider] = true;
             mintRequests[_index].tokenId = _id;
+            emit TokenIssuance(mr.serviceProvider, true, _id, mr.tokenName, mr.amount);
         }
         else{
             _id = mr.tokenId;
             balances[_id][mr.serviceProvider] = mr.amount.add(balances[_id][mr.serviceProvider]);
             serviceProvider[mr.serviceProvider] = true;
+            emit TokenIssuance(mr.serviceProvider, false, mr.tokenId, mr.tokenName, mr.amount);
         }
         mintRequests[_index].created = true;
         // Transfer event with mint semantic
@@ -235,6 +246,7 @@ contract BchipToken is ERC1155 {
             // or if _id is not valid (balance will be 0)
             balances[id][_from] = balances[id][_from].sub(value);
             balances[id][receiver]   = value.add(balances[id][receiver]);
+            emit TokenAward(receiver, _id, tokens[_id].tokenName, value);
         }
     }
     
@@ -253,6 +265,7 @@ contract BchipToken is ERC1155 {
         // Emit the Transfer/Mint event.
         // the 0x0 source address implies a mint
         // It will also provide the circulating supply info.
+        emit TokenAward(_recipient, _tokenId, tokens[_tokenId].tokenName, _amount);
         emit TransferSingle(_minter, address(0x0), _recipient, _tokenId, _amount);
 
         if (_recipient.isContract()) {
